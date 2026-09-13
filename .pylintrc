@@ -1,0 +1,36 @@
+[MAIN]
+source-roots = src
+py-version = 3.12
+jobs = 0
+fail-under = 9.5
+
+[MESSAGES CONTROL]
+disable =
+    R0801,  # duplicate-code — noisy; small shared Scene blocks are intentional
+    E1101,  # no-member — astropy/skyfield stub gaps; pyright is authoritative
+
+[FORMAT]
+max-line-length = 88
+
+[BASIC]
+good-names =
+    i,j,k,n,m,t,s,u,v,
+    x,y,z,
+    a,b,c,d,e,f,g,p,q,r,
+    w,h,
+    dt,dx,dy,
+    ra,dec,el,az,alt,
+    vx,vy,vz,
+    mu,sigma,theta,alpha,beta,
+    ts,A,INF
+good-names-rgxs =
+    ^_+$,
+    ^_[a-z][a-z0-9_]*$
+
+[DESIGN]
+max-args = 12
+max-positional-arguments = 12
+max-locals = 25
+max-branches = 20
+max-statements = 80
+max-attributes = 15

@@ -1,0 +1,131 @@
+# ─────────────────────────────────────────────────────────────────────────────
+# OpTA Pipeline Defaults Configuration
+# ─────────────────────────────────────────────────────────────────────────────
+# Parameters for opta-pipeline modules (calibrate → detect → astrometry →
+# tracklet). Values derived from the T-01 v3 selected hardware (IMX585 +
+# 7Artisans 25 mm f/0.95, SYSTEMS.md 2026-06-09) and current SOTA gate model
+# runs. Edit here; pipeline reads at startup.
+
+# ── Hardware (T-01 v3 reference node) ────────────────────────────────────────
+# `frame_rate_hz` and `pixel_scale_arcsec` ARE parsed: the `derived` gates
+# below (tracklet.max_sep_arcsec, astrometry.max_residual_arcsec) follow them,
+# so a different camera only needs these two numbers changed.  `profile`
+# names the opta-model hardware-catalog entry the numbers came from; it is
+# consulted only if one of the two numbers is missing (needs opta-model).
+# The remaining keys are documentation of the reference node.
+hardware:
+  profile: selected_v3_roi    # v3 node, 25 fps ROI baseline (= validation_operational)
+  sensor: IMX585              # SVBONY SV705C body
+  optics: artisans_25_f095    # 7Artisans 25 mm f/0.95 (T-01 v3)
+  focal_length_mm: 25.0
+  aperture_mm: 26.3           # 25.0 / 0.95
+  pixel_size_um: 2.9   # IMX585 datasheet pitch (MA-002 unification, 2026-07)
+  pixel_scale_arcsec: 23.926717   # 206265 * 2.9 um / 25 mm; drives the astrometric prune gate
+  resolution_h: 1920          # ROI mode for 25fps
+  resolution_v: 1080
+  frame_rate_hz: 25.0         # drives the tracklet association gate
+  integration_time_s: 0.04    # 1/25 s
+
+# ── Frame format (T-07: FITS selected) ───────────────────────────────────────
+# DOCUMENTATION ONLY — this block is NOT parsed by PipelineConfig; the
+# required-header list lives in opta_pipeline.ingest._REQUIRED_HEADERS.
+frame_format:
+  type: fits
+  bitdepth: 16
+  compression: rice            # fpack/rice, 3-5x lossless compression
+  required_headers:
+    - DATE-OBS                 # ISO 8601 UTC timestamp of exposure start
+    - NODE-ID                  # node identifier string
+    - EXPTIME                  # exposure time in seconds
+    - INSTRUME                 # sensor model (IMX585)
+    - GAIN                     # sensor gain in dB or e-/ADU
+    - TEMP                     # sensor temperature in Celsius
+    # WCS added by astrometry step:
+    # WCSAXES, CTYPE1/2, CRPIX1/2, CRVAL1/2, CD1_1/CD1_2/CD2_1/CD2_2
+
+# ── Calibration (calibrate module) ───────────────────────────────────────────
+# Master dark/flat frames are supplied per frame via FrameContext, not built
+# from config.
+calibration:
+  background_box_size: 64      # pixels for background mesh (SExtractor-style)
+  background_filter_size: 3    # median filter on background mesh
+
+# ── Detection (detect module) ────────────────────────────────────────────────
+detection:
+  snr_threshold: 3.0           # minimum SNR for candidate source
+  min_streak_pixels: 5         # minimum pixels in a connected streak
+  max_streak_pixels: 500       # reject extended sources (e.g., aircraft, satellites in long exp)
+  elongation_threshold: 2.0    # minor/major axis ratio to classify as streak vs. point
+  mask_star_radius_px: 5       # mask radius around bright stars to suppress false streaks
+  mask_veto_max_trajectory_frac: 0.5  # velocity-aware star veto: drop a stacked candidate only if its trajectory dwells on the star mask >= this fraction of the pass (a static source, not a transiting mover); reference-epoch-only veto cost ~13% mover completeness
+
+# ── Astrometry (astrometry module) ───────────────────────────────────────────
+astrometry:
+  # Per-star WCS outlier prune, derived from hardware.profile
+  # (opta_pipeline.config.derive_max_residual_arcsec): 3σ × RSS(centroiding
+  # 0.3 px × plate scale, 2.0" residual distortion) — the OpTA.NOD.ACC 10"
+  # budget's per-star terms (error_budget.astrometric_error_budget). At
+  # selected_v3_roi (23.927"/px): 3 × 7.451 = 22.354" = 0.93 px. The old
+  # absolute 4.0" was 0.17 px at this scale — sub-pixel-impossible.
+  max_residual_arcsec: derived
+  rolling_shutter_correction: true  # T-03: correct centroid bias for rolling shutter
+  sip_distortion: true         # T-11: fit a radial SIP term (wide-prime barrel); falls back to linear when absent
+  skip_flagged_frames: false   # OpTA.NOD.ACC accuracy_flag policy: false = annotate-only (tracklets carry wcs_accuracy_flagged); true = exclude flagged frames from astrometry. Keep false for first light (collect, don't drop).
+
+# ── Rolling shutter correction (T-03) ────────────────────────────────────────
+rolling_shutter:
+  enabled: true
+  row_readout_us: 37.0         # microseconds per row (IMX585, 1920×1080 ROI, 25fps)
+  reference_row: 540           # row 540 = frame center (zero timing offset)
+
+# ── Tracklet formation (tracklet module) ─────────────────────────────────────
+tracklet:
+  min_detections: 3            # minimum detections per tracklet
+  max_gap_frames: 5            # maximum consecutive missed frames before track break
+  linear_fit_residual_arcsec: 15.0  # maximum residual from linear tracklet fit
+  # Hungarian linker association gate, arcsec per elapsed frame (scaled by
+  # frame gap), derived from hardware.profile
+  # (opta_pipeline.config.derive_max_sep_arcsec): design max angular rate
+  # 2.0°/s (T-03, SYSTEMS.md 2026-05-27) × 1.25 headroom (= the ratified
+  # 2.5°/s Level-A correlation rate bound, OPTA_COMMISSIONING) × 3600 / fps.
+  # At selected_v3_roi (25 fps): 360"/frame — an exact 2.5°/s rate ceiling
+  # (the old absolute 300 was ~2.08°/s and, at all-sky plate scales,
+  # ~1.9 px/frame — meteor-blind).
+  max_sep_arcsec: derived
+
+# ── Stacking (track-and-stack) ────────────────────────────────────────────────
+stacking:
+  enabled: true
+  velocity_max_px_s: 400.0     # ±~2.66 deg/s at the v3 23.927 arcsec/px (400×23.927/3600) — covers the 2.5 deg/s linker ceiling; at the v2 17.1 arcsec/px this same grid was ±~1.9 deg/s
+  velocity_step_px_s: 20.0     # ~0.12 deg/s resolution; tune for CPU budget
+  velocity_min_px_s: 0.0       # >0 excludes near-static hypotheses (mover search)
+  window_duration_s: 0.0       # >0 splits long passes into locally-linear windows
+  window_overlap_s: 0.0        # overlap between consecutive stacking windows
+  dedup_radius_arcsec: 30.0    # cross-window duplicate-identity radius: 3x the 10 arcsec OpTA.NOD.ACC budget (same object = tracks agree within astrometric error), NOT the rate-derived association gate (360 arcsec/frame at the v3 ROI baseline)
+  fallback_fps: 25.0           # assumed fps when frame timestamps cannot yield one
+  psf_sigma_px: 0.849          # Gaussian PSF sigma for the likelihood matched filter = synth psf_fwhm_px 2.0 / 2.355 (matched to the frames it runs against; the old 1.5 was a sigma<->FWHM confusion, ~2x too wide, forfeiting ~14% SNR)
+  far_margin_sigma: 0.5        # margin over the Bernstein u* = poisson_tail_threshold(Npix*Nhyp, eps) (2026-07-28; Gaussian sqrt(2 ln N) is its eps=0 limit)
+  coarse_to_fine: true         # blind search: windowed seeding + pyramid refinement (Phase 2)
+  coarse_prethreshold_sigma: 4.0  # stage-1 per-window seeding threshold (sensitivity knob)
+  max_fine_candidates: 20      # candidate cap between stage 1 and pyramid refinement
+  seed_window_s: 0.0           # stage-1 seeding window; 0 = auto (criterion / >=4 frames / depth-matched T*(pre/u*)^2, 2026-07-28)
+  seed_binning: 1              # b x b binned seeding (1 = off); ~3x faster at 2, renormalized SNR
+  refine_snr_min: 7.0          # F8 per-frame centroid-refinement gate (sigma); below it the predicted track position is passed through (~5 sigma nominal x1.4 local-noise margin, findings #11/#12)
+  streak_kernel: false         # F4 within-exposure streak kernel (opt-in); re-scores the known winning velocity with a trail-matched kernel (search stays round-PSF)
+  exposure_time_s: 0.0         # FALLBACK ONLY (s): the pipeline derives the streak-kernel exposure from the actual frame cadence (median inter-frame dt = frame period at shutter-open duty ~1) — one source of truth that tracks the real mode (21 fps full-res detection basis / 25 fps ROI). This constant is used only when <2 timestamps are available; 0 = no fallback trail. Used only when streak_kernel: true
+  streak_min_length_px: 1.0    # only build a streak kernel when the trail |v|*exposure clears this many px; below it the round PSF is used (no-op)
+
+# ── Output (I-02 interface) ───────────────────────────────────────────────────
+# DOCUMENTATION ONLY — this block is NOT parsed by PipelineConfig; the I-02
+# JSON schema is implemented in opta_pipeline.tracklet.
+output:
+  format: json
+  schema: i02_tracklet          # matches SYSTEMS.md I-02 spec
+  fields:                       # required I-02 fields
+    - ra                        # degrees, J2000
+    - dec                       # degrees, J2000
+    - utc                       # ISO 8601 UTC
+    - sigma_ra                  # arcsec, per-axis
+    - sigma_dec                 # arcsec, per-axis
+    - object_id                 # TLE NORAD ID if matched, null otherwise
+    - node_id                   # node identifier

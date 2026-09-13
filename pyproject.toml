@@ -1,0 +1,67 @@
+[build-system]
+requires = ["setuptools>=69", "wheel"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "opta-pipeline"
+version = "0.1.0"
+description = "OpTA detection pipeline: sensor frames in, astrometric satellite tracklets (I-02 JSON, CCSDS TDM) out"
+license = "Apache-2.0"
+authors = [{ name = "Project Vesida contributors" }]
+keywords = ["space-situational-awareness", "satellite-tracking", "astrometry", "track-and-stack"]
+classifiers = [
+  "Development Status :: 3 - Alpha",
+  "Intended Audience :: Science/Research",
+  "Programming Language :: Python :: 3",
+  "Topic :: Scientific/Engineering :: Astronomy",
+]
+readme = "README.md"
+requires-python = ">=3.11"
+dependencies = [
+  "astropy>=6.1",
+  "matplotlib>=3.8",
+  "numpy>=2.0",
+  "pandas>=2.2",
+  "scipy>=1.13",
+  "pyyaml>=6.0",
+]
+
+[project.optional-dependencies]
+# Synthetic frame rendering (opta_pipeline.synth) draws its physics from
+# opta-model.  The runtime detection path does not need it.
+synth = ["opta-model>=0.1,<0.2"]
+# Video/PNG ingest for real cameras (opta_pipeline.ingest_video); ffmpeg must
+# be on PATH for the container probes.
+video = [
+  "opencv-python-headless>=4.10",
+  "imageio>=2.34",
+  "imageio-ffmpeg>=0.5",
+]
+dev = [
+  "opta-pipeline[synth,video]",
+  "pylint>=3.3",
+  "pyright>=1.1",
+  "pytest>=8.0",
+  "pytest-xdist>=3.6",
+  "ruff>=0.6",
+]
+
+[tool.setuptools]
+package-dir = {"" = "src"}
+
+[tool.setuptools.packages.find]
+where = ["src"]
+
+[tool.setuptools.package-data]
+opta_pipeline = ["configs/*.yaml"]
+
+[project.urls]
+Homepage = "https://github.com/project-vesida/opta-pipeline"
+Organisation = "https://github.com/project-vesida"
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]
+pythonpath = ["src", "tests"]
+markers = [
+  "slow: tests >5 s (deselect with '-m \"not slow\"'); includes completeness sweeps",
+]
